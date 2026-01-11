@@ -7,257 +7,180 @@ from snowflake.snowpark.context import get_active_session
 # Get Snowflake session
 session = get_active_session()
 
-# Load data from Snowflake
+# Load health monitoring data from Snowflake
 @st.cache_data
 def load_data(_session):
-    """Load reviews_with_sentiment data from Snowflake"""
     query = """
-    SELECT 
-        ORDER_ID,
-        FILENAME,
-        PRODUCT,
-        REVIEW_DATE,
-        SHIPPING_DATE,
-        CARRIER,
-        TRACKING_NUMBER,
-        LATITUDE,
-        LONGITUDE,
-        STATUS,
-        DELIVERY_DAYS,
-        LATE,
-        REGION,
-        REVIEW_TEXT,
-        SENTIMENT_SCORE
-    FROM M2.SCHEMA.REVIEWS_WITH_SENTIMENT
+    SELECT
+        PATIENT_ID,
+        PATIENT_NAME,
+        GENDER,
+        AGE,
+        RECORD_DATE,
+        HEART_RATE,
+        BODY_TEMPERATURE,
+        OXYGEN_LEVEL,
+        BLOOD_PRESSURE,
+        RISK_LEVEL,
+        ALERT_STATUS,
+        LOCATION
+    FROM HEALTH_DB.PUBLIC.PATIENT_VITALS
     """
     df = _session.sql(query).to_pandas()
     return df
 
-# Load the dataset
+# Load dataset
 df = load_data(session)
 
-# Main title
-st.title("📦 Avalanche Product Dashboard")
-st.markdown("### Analyze Customer Sentiment and Shipping Performance")
+# -----------------------------
+# Dashboard Title
+# -----------------------------
+st.title("🏥 Health Monitoring Dashboard")
+st.markdown("### Real-Time Patient Vitals, Risk Analysis, and Alerts")
 
-# Sidebar filters
+# -----------------------------
+# Sidebar Filters
+# -----------------------------
 st.sidebar.header("🔍 Filters")
 
-# Product filter
-products = ['All'] + sorted(df['PRODUCT'].dropna().unique().tolist())
-selected_product = st.sidebar.multiselect(
-    "Select Product(s)",
-    products,
-    default=['All']
+patients = ["All"] + sorted(df["PATIENT_NAME"].dropna().unique().tolist())
+selected_patients = st.sidebar.multiselect(
+    "Select Patient(s)", patients, default=["All"]
 )
 
-# Region filter
-regions = ['All'] + sorted(df['REGION'].dropna().unique().tolist())
-selected_region = st.sidebar.multiselect(
-    "Select Region(s)",
-    regions,
-    default=['All']
+genders = ["All"] + sorted(df["GENDER"].dropna().unique().tolist())
+selected_gender = st.sidebar.multiselect(
+    "Select Gender", genders, default=["All"]
 )
 
-# Carrier filter
-carriers = ['All'] + sorted(df['CARRIER'].dropna().unique().tolist())
-selected_carrier = st.sidebar.multiselect(
-    "Select Carrier(s)",
-    carriers,
-    default=['All']
-)
-
-# Delivery status filter
-delivery_statuses = ['All'] + sorted(df['STATUS'].dropna().unique().tolist())
-selected_status = st.sidebar.multiselect(
-    "Select Delivery Status",
-    delivery_statuses,
-    default=['All']
+risk_levels = ["All"] + sorted(df["RISK_LEVEL"].dropna().unique().tolist())
+selected_risk = st.sidebar.multiselect(
+    "Select Risk Level", risk_levels, default=["All"]
 )
 
 # Apply filters
 filtered_df = df.copy()
 
-if 'All' not in selected_product:
-    filtered_df = filtered_df[filtered_df['PRODUCT'].isin(selected_product)]
+if "All" not in selected_patients:
+    filtered_df = filtered_df[filtered_df["PATIENT_NAME"].isin(selected_patients)]
 
-if 'All' not in selected_region:
-    filtered_df = filtered_df[filtered_df['REGION'].isin(selected_region)]
+if "All" not in selected_gender:
+    filtered_df = filtered_df[filtered_df["GENDER"].isin(selected_gender)]
 
-if 'All' not in selected_carrier:
-    filtered_df = filtered_df[filtered_df['CARRIER'].isin(selected_carrier)]
+if "All" not in selected_risk:
+    filtered_df = filtered_df[filtered_df["RISK_LEVEL"].isin(selected_risk)]
 
-if 'All' not in selected_status:
-    filtered_df = filtered_df[filtered_df['STATUS'].isin(selected_status)]
-
-# Display key metrics
+# -----------------------------
+# KPI Metrics
+# -----------------------------
 st.markdown("---")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Total Reviews", len(filtered_df))
+    st.metric("👥 Patients", filtered_df["PATIENT_ID"].nunique())
 
 with col2:
-    avg_sentiment = filtered_df['SENTIMENT_SCORE'].mean()
-    st.metric("Avg Sentiment Score", f"{avg_sentiment:.2f}")
+    st.metric("❤️ Avg Heart Rate", f"{filtered_df['HEART_RATE'].mean():.0f} bpm")
 
 with col3:
-    late_percentage = (filtered_df['LATE'].sum() / len(filtered_df) * 100) if len(filtered_df) > 0 else 0
-    st.metric("Late Deliveries", f"{late_percentage:.1f}%")
+    st.metric("🌡️ Avg Temperature", f"{filtered_df['BODY_TEMPERATURE'].mean():.1f} °C")
 
 with col4:
-    avg_delivery_days = filtered_df['DELIVERY_DAYS'].mean()
-    st.metric("Avg Delivery Days", f"{avg_delivery_days:.1f}")
+    alert_rate = (filtered_df["ALERT_STATUS"].sum() / len(filtered_df)) * 100
+    st.metric("🚨 Alert Rate", f"{alert_rate:.1f}%")
 
+# -----------------------------
 # Data Preview
+# -----------------------------
 st.markdown("---")
-st.subheader("📊 Data Preview")
+st.subheader("📋 Patient Vitals Preview")
 st.dataframe(filtered_df.head(10), use_container_width=True)
 
-# Visualize Sentiment by Region
+# -----------------------------
+# Average Vitals by Risk Level
+# -----------------------------
 st.markdown("---")
-st.subheader("🌍 Average Sentiment Score by Region")
+st.subheader("📊 Average Vitals by Risk Level")
 
-# Calculate average sentiment by region
-sentiment_by_region = filtered_df.groupby('REGION')['SENTIMENT_SCORE'].mean().sort_values()
+risk_summary = filtered_df.groupby("RISK_LEVEL").agg({
+    "HEART_RATE": "mean",
+    "BODY_TEMPERATURE": "mean",
+    "OXYGEN_LEVEL": "mean"
+})
 
-# Create matplotlib plot
 fig, ax = plt.subplots(figsize=(10, 6))
-sentiment_by_region.plot(kind='barh', ax=ax, color='skyblue')
-ax.set_xlabel('Average Sentiment Score')
-ax.set_ylabel('Region')
-ax.set_title('Average Sentiment Score by Region')
-ax.axvline(x=0, color='red', linestyle='--', linewidth=1, alpha=0.5)
-ax.grid(axis='x', alpha=0.3)
+risk_summary.plot(kind="bar", ax=ax)
+ax.set_ylabel("Average Value")
+ax.set_title("Patient Vitals by Risk Level")
+ax.grid(axis="y", alpha=0.3)
 
 st.pyplot(fig)
 
-# Highlight Delivery Issues
+# -----------------------------
+# Health Alerts
+# -----------------------------
 st.markdown("---")
-st.subheader("⚠️ Delivery Issues with Negative Sentiment")
+st.subheader("⚠️ Patients with Active Alerts")
 
-# Filter for negative sentiment and delivery issues
-negative_reviews = filtered_df[
-    (filtered_df['SENTIMENT_SCORE'] < 0) & 
-    (filtered_df['LATE'] == True)
-]
+alerts_df = filtered_df[filtered_df["ALERT_STATUS"] == True]
 
-# Group by region and product
-issues_summary = negative_reviews.groupby(['REGION', 'PRODUCT']).agg({
-    'ORDER_ID': 'count',
-    'SENTIMENT_SCORE': 'mean',
-    'DELIVERY_DAYS': 'mean',
-    'STATUS': lambda x: x.mode()[0] if len(x) > 0 else 'N/A'
+alerts_summary = alerts_df.groupby("PATIENT_NAME").agg({
+    "HEART_RATE": "mean",
+    "BODY_TEMPERATURE": "mean",
+    "OXYGEN_LEVEL": "mean",
+    "ALERT_STATUS": "count"
 }).reset_index()
 
-issues_summary.columns = ['Region', 'Product', 'Issue Count', 'Avg Sentiment', 'Avg Delivery Days', 'Most Common Status']
-issues_summary = issues_summary.sort_values('Issue Count', ascending=False)
+alerts_summary.columns = [
+    "Patient Name",
+    "Avg Heart Rate",
+    "Avg Temperature",
+    "Avg Oxygen Level",
+    "Alert Count"
+]
 
-st.dataframe(issues_summary, use_container_width=True)
+st.dataframe(alerts_summary.sort_values("Alert Count", ascending=False),
+             use_container_width=True)
 
-# Additional visualizations
+# -----------------------------
+# Trends Over Time
+# -----------------------------
 st.markdown("---")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📈 Sentiment Trends Over Time")
-    filtered_df['REVIEW_DATE'] = pd.to_datetime(filtered_df['REVIEW_DATE'])
-    sentiment_over_time = filtered_df.groupby(filtered_df['REVIEW_DATE'].dt.to_period('M'))['SENTIMENT_SCORE'].mean()
-    
+    st.subheader("📈 Heart Rate Trend")
+    filtered_df["RECORD_DATE"] = pd.to_datetime(filtered_df["RECORD_DATE"])
+    heart_trend = filtered_df.groupby(
+        filtered_df["RECORD_DATE"].dt.to_period("M")
+    )["HEART_RATE"].mean()
+
     fig2, ax2 = plt.subplots(figsize=(8, 5))
-    sentiment_over_time.plot(ax=ax2, marker='o', linewidth=2, color='green')
-    ax2.set_xlabel('Month')
-    ax2.set_ylabel('Average Sentiment Score')
-    ax2.set_title('Sentiment Trends Over Time')
-    ax2.axhline(y=0, color='red', linestyle='--', linewidth=1, alpha=0.5)
+    heart_trend.plot(ax=ax2, marker="o", linewidth=2)
+    ax2.set_ylabel("Avg Heart Rate")
+    ax2.set_xlabel("Month")
     ax2.grid(alpha=0.3)
+
     st.pyplot(fig2)
 
 with col2:
-    st.subheader("🚚 Carrier Performance")
-    carrier_performance = filtered_df.groupby('CARRIER').agg({
-        'SENTIMENT_SCORE': 'mean',
-        'LATE': lambda x: (x.sum() / len(x) * 100)
-    }).round(2)
-    
+    st.subheader("🫁 Oxygen Level Trend")
+    oxygen_trend = filtered_df.groupby(
+        filtered_df["RECORD_DATE"].dt.to_period("M")
+    )["OXYGEN_LEVEL"].mean()
+
     fig3, ax3 = plt.subplots(figsize=(8, 5))
-    carrier_performance['SENTIMENT_SCORE'].plot(kind='bar', ax=ax3, color='coral')
-    ax3.set_xlabel('Carrier')
-    ax3.set_ylabel('Average Sentiment Score')
-    ax3.set_title('Carrier Performance by Sentiment')
-    ax3.tick_params(axis='x', rotation=45)
-    ax3.grid(axis='y', alpha=0.3)
+    oxygen_trend.plot(ax=ax3, marker="o", linewidth=2)
+    ax3.set_ylabel("Avg Oxygen Level")
+    ax3.set_xlabel("Month")
+    ax3.grid(alpha=0.3)
+
     st.pyplot(fig3)
 
-# Chatbot Assistant using Cortex (Optional - requires Cortex enabled)
-st.markdown("---")
-
-# Check if Cortex is available
-try:
-    test_query = "SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', 'test') as response"
-    session.sql(test_query).collect()
-    cortex_available = True
-except:
-    cortex_available = False
-
-if cortex_available:
-    st.subheader("💬 AI Assistant - Ask Questions About Your Data")
-    
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Ask a question about customer sentiment or shipping performance..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        data_summary = f"""
-        You are analyzing customer review and shipping data with the following summary:
-        - Total reviews: {len(filtered_df)}
-        - Average sentiment score: {filtered_df['SENTIMENT_SCORE'].mean():.2f}
-        - Late delivery rate: {(filtered_df['LATE'].sum() / len(filtered_df) * 100):.1f}%
-        - Average delivery days: {filtered_df['DELIVERY_DAYS'].mean():.1f}
-        - Regions: {', '.join(filtered_df['REGION'].unique())}
-        - Products: {', '.join(filtered_df['PRODUCT'].unique())}
-        - Carriers: {', '.join(filtered_df['CARRIER'].unique())}
-        
-        Top issues by region:
-        {issues_summary.head(5).to_string()}
-        
-        User question: {prompt}
-        
-        Provide a helpful, concise answer based on this data.
-        """
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    # Use Snowflake Cortex via SQL
-                    cortex_query = f"""
-                    SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                        'mistral-large2',
-                        '{data_summary.replace("'", "''")}'
-                    ) as response
-                    """
-                    result = session.sql(cortex_query).collect()
-                    response = result[0]['RESPONSE']
-                    st.markdown(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    error_msg = f"Sorry, I encountered an error: {str(e)}"
-                    st.markdown(error_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
-else:
-    st.info("💡 **AI Chatbot Not Available**: Snowflake Cortex is not enabled for this account. Contact your Snowflake administrator to enable Cortex features.")
-
+# -----------------------------
 # Footer
+# -----------------------------
 st.markdown("---")
-st.markdown("**Avalanche Product Dashboard** | Powered by Snowflake Cortex & Streamlit")
+st.markdown(
+    "**Health Monitoring Dashboard** | Powered by Streamlit & Snowflake"
+)
